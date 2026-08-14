@@ -120,6 +120,11 @@ runuser -l podman -c 'curl -Lfs https://github.com/GitSquared/node-geolite2-redi
 
 ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #####
 
+# unprivileged port start
+cat <<'EOF' >/etc/sysctl.d/99-unprivileged-port-start.conf
+net.ipv4.ip_unprivileged_port_start=0
+EOF
+sysctl --system >/dev/null 2>&1
 # pangolin pod
 runuser -l podman -c 'cat >$HOME/pods/pangolin.pod' <<'EOF'
 [Unit]
@@ -127,9 +132,11 @@ After=network-online.target
 Wants=network-online.target
 [Pod]
 PodName=pangolin
-PublishPort=11080:80
-PublishPort=11443:443
-PublishPort=11820:11820/udp
+PublishPort=80:80/tcp
+PublishPort=443:443/tcp
+PublishPort=21820:21820/udp
+PublishPort=31443:31443/tcp
+PublishPort=31820:31820/udp
 [Service]
 Restart=always
 [Install]
@@ -166,7 +173,7 @@ ContainerName=proxy-gerbil
 Image=docker.io/fosrl/gerbil:latest
 Pod=pangolin.pod
 Volume=%h/data/pangolin:/var/config
-HealthCmd=["nc","-uz","localhost","11820"]
+HealthCmd=["nc","-uz","localhost","31820"]
 HealthOnFailure=kill
 Notify=healthy
 AddCapability=NET_ADMIN SYS_MODULE
@@ -189,7 +196,7 @@ Pod=pangolin.pod
 Volume=%h/data/pangolin/letsencrypt:/letsencrypt
 Volume=%h/data/pangolin/traefik:/etc/traefik:ro
 Volume=%h/data/pangolin/traefik/logs:/var/log/traefik:U
-HealthCmd=["nc","-z","localhost","443"]
+HealthCmd=["nc","-z","localhost","31443"]
 HealthOnFailure=kill
 Notify=healthy
 Exec='--configFile=/etc/traefik/config.yml'
@@ -214,13 +221,17 @@ certificatesResolvers:
         provider: duckdns
       storage: "/letsencrypt/acme.json"
 entryPoints:
-  web:
-    address: ":80"
   websecure:
-    address: ":443"
+    address: ":31443/tcp"
     http:
       tls:
         certResolver: "letsencrypt"
+  tcp-80:
+    address: ":80/tcp"
+  tcp-443:
+    address: ":443/tcp"
+  tcp-21820:
+    address: ":21820/udp"
 experimental:
   plugins:
     badger:
@@ -233,7 +244,7 @@ log:
   maxBackups: 4
   maxSize: 64
 ping:
-  entryPoint: "web"
+  entryPoint: "websecure"
 providers:
   file:
     filename: "/etc/traefik/dynamic.yml"
@@ -262,14 +273,6 @@ http:
       service: api-service
       tls:
         certResolver: letsencrypt
-    main-app-router-redirect:
-      entryPoints:
-        - web
-      middlewares:
-        - badger
-        - redirect-to-https
-      rule: "Host(\`$_pangolin_domain\`)"
-      service: next-service
     next-router:
       entryPoints:
         - websecure
@@ -310,7 +313,7 @@ EOF
 # https://docs.pangolin.net/self-host/advanced/config-file
 runuser -l podman -c 'cat >$HOME/data/pangolin/config.yml' <<EOF
 app:
-    dashboard_url: "https://$_pangolin_domain:11443"
+    dashboard_url: "https://$_pangolin_domain:31443"
     log_failed_attempts: true
     telemetry:
         anonymous_usage: false
@@ -318,20 +321,24 @@ domains:
     duckdns_domain:
         base_domain: "$_pangolin_domain"
 flags:
+    allow_raw_resources: true
+    disable_enterprise_features: true
     disable_local_sites: true
+    disable_product_help_banners: true
     disable_signup_without_invite: true
     disable_user_create_org: true
 gerbil:
     base_endpoint: "$_pangolin_domain"
-    start_port: 11820
+    clients_start_port: 31819
+    start_port: 31820
 server:
     cors:
         credentials: false
-        origins: ["https://$_pangolin_domain:11443"]
+        origins: ["https://$_pangolin_domain:31443"]
     maxmind_db_path: "./config/GeoLite2-Country.mmdb"
     secret: "$(runuser -l podman -c 'cat $HOME/secrets/pangolin/server-secret.key')"
 EOF
 runuser -l podman -c 'systemctl --user daemon-reload'
 runuser -l podman -c 'systemctl --user restart pangolin-pod'
-#runuser -l podman -c 'journalctl --user -u "proxy-*" -f'
+runuser -l podman -c 'journalctl --user -u "proxy-*" -f'
 #podman -r ps -a

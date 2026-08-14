@@ -125,7 +125,7 @@ WantedBy=default.target
 EOF
 systemctl daemon-reload
 systemctl restart newt-pod
-journalctl -u "server-pangolin-newt" -f
+#journalctl -u "server-pangolin-*" -f
 #podman ps -a
 
 ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #####
@@ -133,7 +133,6 @@ journalctl -u "server-pangolin-newt" -f
 # pangolin secrets
 mkdir -p "$HOME/secrets/pangolin"
 openssl rand -hex 64 >"$HOME/secrets/pangolin/server-secret.key"
-echo "PLACEHOLDER" >"$HOME/secrets/pangolin/acme-spaceship.key"
 # pangolin geoblock db
 apt install -y curl
 mkdir -p "$HOME/data/pangolin"
@@ -143,28 +142,29 @@ curl -Lfs https://github.com/GitSquared/node-geolite2-redist/raw/refs/heads/mast
 ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #####
 
 # pangolin pod
-runuser -l podman -c 'cat >$HOME/pods/pangolin.pod' <<'EOF'
+cat >"$HOME/pods/pangolin.pod" <<'EOF'
 [Unit]
 After=network-online.target
 Wants=network-online.target
 [Pod]
 PodName=pangolin
-PublishPort=11080:80
-PublishPort=11443:443
-PublishPort=11820:11820/udp
+PublishPort=80:80
+PublishPort=443:443
+PublishPort=21820:21820/udp
+PublishPort=31820:31820/udp
 [Service]
 Restart=always
 [Install]
 WantedBy=default.target
 EOF
 # pangolin
-_pangolin_domain=boarede.duckdns.org
-runuser -l podman -c 'mkdir -p $HOME/data/pangolin/db'
-runuser -l podman -c 'mkdir -p $HOME/data/pangolin/letsencrypt'
-runuser -l podman -c 'mkdir -p $HOME/data/pangolin/traefik/logs'
-runuser -l podman -c 'cat >$HOME/pods/proxy-pangolin.container' <<'EOF'
+_pangolin_domain=pangolin.boarede.com
+mkdir -p "$HOME/data/pangolin/db"
+mkdir -p "$HOME/data/pangolin/letsencrypt"
+mkdir -p "$HOME/data/pangolin/traefik/logs"
+cat >"$HOME/pods/server-pangolin.container" <<'EOF'
 [Container]
-ContainerName=proxy-pangolin
+ContainerName=server-pangolin
 Image=docker.io/fosrl/pangolin:ee-latest
 Pod=pangolin.pod
 Volume=%h/data/pangolin:/app/config
@@ -179,12 +179,12 @@ Restart=always
 WantedBy=default.target
 EOF
 # gerbil
-runuser -l podman -c 'cat >$HOME/pods/proxy-gerbil.container' <<'EOF'
+cat >"$HOME/pods/server-gerbil.container" <<'EOF'
 [Unit]
-After=proxy-pangolin.service
-Requires=proxy-pangolin.service
+After=server-pangolin.service
+Requires=server-pangolin.service
 [Container]
-ContainerName=proxy-gerbil
+ContainerName=server-gerbil
 Image=docker.io/fosrl/gerbil:latest
 Pod=pangolin.pod
 Volume=%h/data/pangolin:/var/config
@@ -200,12 +200,12 @@ Restart=always
 WantedBy=default.target
 EOF
 # traefik
-runuser -l podman -c 'cat >$HOME/pods/proxy-traefik.container' <<EOF
+cat >"$HOME/pods/server-traefik.container" <<EOF
 [Unit]
-After=proxy-pangolin.service
-Requires=proxy-pangolin.service
+After=server-pangolin.service
+Requires=server-pangolin.service
 [Container]
-ContainerName=proxy-traefik
+ContainerName=server-traefik
 Image=docker.io/traefik:latest
 Pod=pangolin.pod
 Volume=%h/data/pangolin/letsencrypt:/letsencrypt
@@ -215,7 +215,6 @@ HealthCmd=["nc","-z","localhost","443"]
 HealthOnFailure=kill
 Notify=healthy
 Exec='--configFile=/etc/traefik/config.yml'
-Environment=DUCKDNS_TOKEN=$(runuser -l podman -c 'cat $HOME/secrets/pangolin/acme-duckdns.key')
 AutoUpdate=registry
 [Service]
 Restart=always
@@ -224,16 +223,16 @@ WantedBy=default.target
 EOF
 # traefik setup
 # https://doc.traefik.io/traefik/reference/install-configuration/configuration-options
-# https://go-acme.github.io/lego/dns/duckdns/index.html
+# https://go-acme.github.io/lego/dns/spaceship/index.html
 # https://plugins.traefik.io/plugins/676da7c6eaa878daeef9c7e9/fossorial-badger
-runuser -l podman -c 'cat >$HOME/data/pangolin/traefik/config.yml' <<'EOF'
+cat >"$HOME/data/pangolin/traefik/config.yml" <<'EOF'
 api:
   insecure: true
 certificatesResolvers:
   letsencrypt:
     acme:
-      dnsChallenge:
-        provider: duckdns
+      httpChallenge:
+        entryPoint: web
       storage: "/letsencrypt/acme.json"
 entryPoints:
   web:
@@ -264,7 +263,7 @@ providers:
 serversTransport:
   insecureSkipVerify: true
 EOF
-runuser -l podman -c 'cat >$HOME/data/pangolin/traefik/dynamic.yml' <<EOF
+cat >"$HOME/data/pangolin/traefik/dynamic.yml" <<EOF
 http:
   middlewares:
     badger:
@@ -330,33 +329,34 @@ tcp:
 EOF
 # pangolin setup
 # https://docs.pangolin.net/self-host/advanced/config-file
-runuser -l podman -c 'cat >$HOME/data/pangolin/config.yml' <<EOF
+cat >"$HOME/data/pangolin/config.yml" <<EOF
 app:
-    dashboard_url: "https://$_pangolin_domain:11443"
+    dashboard_url: "https://$_pangolin_domain"
     log_failed_attempts: true
     telemetry:
         anonymous_usage: false
 domains:
-    duckdns_domain:
-        base_domain: "$_pangolin_domain"
+    spaceship_domain:
+        base_domain: "${_pangolin_domain#*.}"
 flags:
+    allow_raw_resources: true
     disable_local_sites: true
     disable_signup_without_invite: true
     disable_user_create_org: true
 gerbil:
     base_endpoint: "$_pangolin_domain"
-    start_port: 11820
+    start_port: 31820
 server:
     cors:
         credentials: false
-        origins: ["https://$_pangolin_domain:11443"]
+        origins: ["https://$_pangolin_domain"]
     maxmind_db_path: "./config/GeoLite2-Country.mmdb"
-    secret: "$(runuser -l podman -c 'cat $HOME/secrets/pangolin/server-secret.key')"
+    secret: "$(cat "$HOME/secrets/pangolin/server-secret.key")"
 EOF
-runuser -l podman -c 'systemctl --user daemon-reload'
-runuser -l podman -c 'systemctl --user restart pangolin-pod'
-#runuser -l podman -c 'journalctl --user -u "proxy-*" -f'
-#podman -r ps -a
+systemctl daemon-reload
+systemctl restart pangolin-pod
+journalctl -u "server-pangolin-*" -f
+#podman ps -a
 
 ###wip
 
