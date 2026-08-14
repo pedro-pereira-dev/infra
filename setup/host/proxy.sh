@@ -125,26 +125,18 @@ cat <<'EOF' >/etc/sysctl.d/99-unprivileged-port-start.conf
 net.ipv4.ip_unprivileged_port_start=0
 EOF
 sysctl --system >/dev/null 2>&1
-# pangolin network
-runuser -l podman -c 'cat >$HOME/pods/pangolin.network' <<'EOF'
-[Network]
-NetworkName=pangolin
-EOF
 # pangolin pod
 runuser -l podman -c 'cat >$HOME/pods/pangolin.pod' <<'EOF'
 [Unit]
 After=network-online.target
 Wants=network-online.target
-Wants=gerbil-pod.service
-Before=gerbil-pod.service
 [Pod]
 PodName=pangolin
-Network=pangolin.network
-NetworkAlias=pangolin-pod-network
 PublishPort=80:80/tcp
 PublishPort=443:443/tcp
-PublishPort=21820:21820/udp
+PublishPort=21820:21821/udp
 PublishPort=31443:31443/tcp
+PublishPort=31820:31820/udp
 [Service]
 Restart=always
 [Install]
@@ -171,22 +163,6 @@ Restart=always
 [Install]
 WantedBy=default.target
 EOF
-# gerbil pod
-runuser -l podman -c 'cat >$HOME/pods/gerbil.pod' <<'EOF'
-[Unit]
-After=network-online.target pangolin-pod.service
-Requires=pangolin-pod.service
-PartOf=pangolin-pod.service
-[Pod]
-PodName=gerbil
-Network=pangolin.network
-NetworkAlias=gerbil-pod-network
-PublishPort=31820:31820/udp
-[Service]
-Restart=always
-[Install]
-WantedBy=default.target
-EOF
 # gerbil
 runuser -l podman -c 'cat >$HOME/pods/proxy-gerbil.container' <<'EOF'
 [Unit]
@@ -195,13 +171,13 @@ Requires=proxy-pangolin.service
 [Container]
 ContainerName=proxy-gerbil
 Image=docker.io/fosrl/gerbil:latest
-Pod=gerbil.pod
+Pod=pangolin.pod
 Volume=%h/data/pangolin:/var/config
 HealthCmd=["nc","-uz","localhost","31820"]
 HealthOnFailure=kill
 Notify=healthy
 AddCapability=NET_ADMIN SYS_MODULE
-Exec='--generateAndSaveKeyTo=/var/config/key' '--local-proxy=pangolin-pod-network' '--reachableAt=http://gerbil-pod-network:3004' '--remoteConfig=http://pangolin-pod-network:3001/api/v1/'
+Exec='--generateAndSaveKeyTo=/var/config/key' '--reachableAt=http://localhost:3004' '--remoteConfig=http://localhost:3001/api/v1/'
 AutoUpdate=registry
 [Service]
 Restart=always
@@ -254,8 +230,8 @@ entryPoints:
     address: ":80/tcp"
   tcp-443:
     address: ":443/tcp"
-  tcp-21820:
-    address: ":21820/udp"
+  tcp-21821:
+    address: ":21821/udp"
 experimental:
   plugins:
     badger:

@@ -95,6 +95,7 @@ cat >"$HOME/pods/newt.pod" <<'EOF'
 [Unit]
 After=network-online.target
 Wants=network-online.target
+PartOf=pangolin.pod
 [Pod]
 PodName=newt
 Network=host
@@ -133,6 +134,8 @@ systemctl restart newt-pod
 # pangolin secrets
 mkdir -p "$HOME/secrets/pangolin"
 openssl rand -hex 64 >"$HOME/secrets/pangolin/server-secret.key"
+echo "PLACEHOLDER" >"$HOME/secrets/pangolin/acme-spaceship-api.key"
+echo "PLACEHOLDER" >"$HOME/secrets/pangolin/acme-spaceship-api.secret"
 # pangolin geoblock db
 apt install -y curl
 mkdir -p "$HOME/data/pangolin"
@@ -148,10 +151,7 @@ After=network-online.target
 Wants=network-online.target
 [Pod]
 PodName=pangolin
-PublishPort=80:80
-PublishPort=443:443
-PublishPort=11820:11820/udp
-PublishPort=21820:21820/udp
+Network=host
 [Service]
 Restart=always
 [Install]
@@ -215,6 +215,9 @@ HealthCmd=["nc","-z","localhost","443"]
 HealthOnFailure=kill
 Notify=healthy
 Exec='--configFile=/etc/traefik/config.yml'
+Environment=SPACESHIP_API_KEY=$(cat "$HOME/secrets/pangolin/acme-spaceship-api.key")
+Environment=SPACESHIP_API_SECRET=$(cat "$HOME/secrets/pangolin/acme-spaceship-api.secret")
+Environment=SPACESHIP_PROPAGATION_TIMEOUT=300
 AutoUpdate=registry
 [Service]
 Restart=always
@@ -231,8 +234,10 @@ api:
 certificatesResolvers:
   letsencrypt:
     acme:
-      httpChallenge:
-        entryPoint: web
+      dnsChallenge:
+        provider: spaceship
+        resolvers:
+          - "1.1.1.1:53"
       storage: "/letsencrypt/acme.json"
 entryPoints:
   web:
@@ -355,7 +360,7 @@ server:
 EOF
 systemctl daemon-reload
 systemctl restart pangolin-pod
-journalctl -u "server-pangolin-*" -f
+journalctl -u "server-*" -f
 #podman ps -a
 
 ###wip
