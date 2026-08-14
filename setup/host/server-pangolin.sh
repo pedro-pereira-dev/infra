@@ -67,8 +67,8 @@ ufw default deny incoming
 ufw allow 22/tcp    # sshd
 ufw allow 80/tcp    # pangolin - http
 ufw allow 443/tcp   # pangolin - https
+ufw allow 11820/udp # pangolin - gerbil
 ufw allow 21820/udp # pangolin - clients
-ufw allow 31820/udp # pangolin - gerbil
 ufw enable
 
 ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #####
@@ -104,10 +104,10 @@ Restart=always
 WantedBy=default.target
 EOF
 # newt
-_proxy_pangolin_domain='https://boarede.duckdns.org:11443'
+_proxy_pangolin_domain='https://boarede.duckdns.org:31443'
 cat >"$HOME/pods/server-pangolin-newt.container" <<EOF
 [Container]
-ContainerName=server-pangolin-newt
+ContainerName=server-newt
 Image=docker.io/fosrl/newt:latest
 Pod=newt.pod
 HealthCmd=["test","-f","/tmp/healthy"]
@@ -125,7 +125,7 @@ WantedBy=default.target
 EOF
 systemctl daemon-reload
 systemctl restart newt-pod
-#journalctl -u "server-pangolin-*" -f
+#journalctl -u "server-*" -f
 #podman ps -a
 
 ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #####
@@ -150,8 +150,8 @@ Wants=network-online.target
 PodName=pangolin
 PublishPort=80:80
 PublishPort=443:443
+PublishPort=11820:11820/udp
 PublishPort=21820:21820/udp
-PublishPort=31820:31820/udp
 [Service]
 Restart=always
 [Install]
@@ -345,7 +345,7 @@ flags:
     disable_user_create_org: true
 gerbil:
     base_endpoint: "$_pangolin_domain"
-    start_port: 31820
+    start_port: 11820
 server:
     cors:
         credentials: false
