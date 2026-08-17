@@ -69,6 +69,8 @@ ufw allow 80/tcp    # pangolin - http
 ufw allow 443/tcp   # pangolin - https
 ufw allow 11820/udp # pangolin - gerbil
 ufw allow 21820/udp # pangolin - clients
+# local newt pod
+ufw route allow in on podman0 out on eth0 from 10.88.0.0/16
 ufw enable
 
 ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #####
@@ -258,6 +260,9 @@ log:
   maxAge: 7
   maxBackups: 4
   maxSize: 64
+accessLog:
+  filePath: "/var/log/traefik/access.log"
+  format: "json"
 ping:
   entryPoint: "web"
 providers:
@@ -337,7 +342,9 @@ EOF
 cat >"$HOME/data/pangolin/config.yml" <<EOF
 app:
     dashboard_url: "https://$_pangolin_domain"
+    log_level: "debug"
     log_failed_attempts: true
+    save_logs: true
     telemetry:
         anonymous_usage: false
 domains:
@@ -352,6 +359,7 @@ gerbil:
     base_endpoint: "$_pangolin_domain"
     start_port: 11820
 server:
+    internal_hostname: "localhost"
     cors:
         credentials: false
         origins: ["https://$_pangolin_domain"]
@@ -361,6 +369,54 @@ EOF
 systemctl daemon-reload
 systemctl restart pangolin-pod
 journalctl -u "server-*" -f
+#podman ps -a
+
+##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #####
+
+# local newt secrets
+mkdir -p "$HOME/secrets/newt"
+echo "PLACEHOLDER" >"$HOME/secrets/newt/local-id.key"
+echo "PLACEHOLDER" >"$HOME/secrets/newt/local-secret.key"
+
+##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #####
+
+# local newt pod
+cat >"$HOME/pods/local-newt.pod" <<'EOF'
+[Unit]
+After=network-online.target
+Wants=network-online.target
+[Pod]
+PodName=local-newt
+Network=podman
+AddHost=pangolin.boarede.com:192.168.0.30
+[Service]
+Restart=always
+[Install]
+WantedBy=default.target
+EOF
+# newt
+_local_pangolin_domain='https://pangolin.boarede.com'
+cat >"$HOME/pods/server-pangolin-local-newt.container" <<EOF
+[Container]
+ContainerName=server-newt-local
+Image=docker.io/fosrl/newt:latest
+Pod=local-newt.pod
+HealthCmd=["test","-f","/tmp/healthy"]
+HealthOnFailure=kill
+Notify=healthy
+Environment=HEALTH_FILE=/tmp/healthy
+Environment=NEWT_ID=$(cat "$HOME/secrets/newt/local-id.key")
+Environment=NEWT_SECRET=$(cat "$HOME/secrets/newt/local-secret.key")
+Environment=PANGOLIN_ENDPOINT=$_local_pangolin_domain
+AutoUpdate=registry
+[Service]
+Restart=always
+[Install]
+WantedBy=default.target
+EOF
+systemctl daemon-reload
+systemctl restart local-newt-pod
+journalctl -u server-newt-local -f
 #podman ps -a
 
 ###wip
